@@ -394,7 +394,7 @@ module SessionMemory
       if codex_hooks_enabled?
         note("Codex feature flag codex_hooks already enabled")
       else
-        hint = <<~HINT
+        hint = <<~HINT.strip
           Codex hooks are not enabled yet. Add this to #{codex_config_path}:
 
           [features]
@@ -402,8 +402,7 @@ module SessionMemory
 
           Then trust the hook with /hooks in the Codex TUI if prompted.
         HINT
-        note(hint.strip)
-        warn(hint) unless dry_run
+        note(hint)
       end
     end
 
