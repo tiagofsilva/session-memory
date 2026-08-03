@@ -164,39 +164,36 @@ module SessionMemory
     def handle_codex
       case normalize_event(@event)
       when "sessionstart"
-        ctx = latest_injection
-        if ctx
-          puts(JSON.generate({
-            "hookSpecificOutput" => {
-              "hookEventName" => "SessionStart",
-              "additionalContext" => ctx,
-            },
-          }))
-        else
-          puts("{}")
-        end
+        emit_codex_context!("SessionStart", latest_injection)
       when "userpromptsubmit"
-        digest = seed_and_log!
-        ctx = Digest.injection_context(digest)
-        # Only inject on first prompt of a brand-new digest that is empty-ish;
-        # prefer latest digest for resume, but still seed this conversation.
-        resume = Digest.injection_context(store.latest_digest)
-        text = resume || ctx
-        if text
-          puts(JSON.generate({
-            "hookSpecificOutput" => {
-              "hookEventName" => "UserPromptSubmit",
-              "additionalContext" => text,
-            },
-          }))
-        else
+        seed_and_log!
+        # Inject at most once per conversation (SessionStart may be unavailable).
+        marker = store.inject_marker_path(session_id)
+        if File.exist?(marker)
           puts("{}")
+        else
+          text = latest_injection || Digest.injection_context(store.digest_path(short))
+          File.write(marker, Time.now.iso8601) if text
+          emit_codex_context!("UserPromptSubmit", text)
         end
       when "stop"
         seed_and_log!
         puts("{}")
       else
         seed_and_log!
+        puts("{}")
+      end
+    end
+
+    def emit_codex_context!(event_name, text)
+      if text
+        puts(JSON.generate({
+          "hookSpecificOutput" => {
+            "hookEventName" => event_name,
+            "additionalContext" => text,
+          },
+        }))
+      else
         puts("{}")
       end
     end
