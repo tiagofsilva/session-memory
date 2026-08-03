@@ -1,0 +1,6 @@
+/.bundle/
+/vendor/
+Gemfile.lock
+.rspec_status
+*.gem
+.DS_Store
