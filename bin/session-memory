@@ -2,6 +2,17 @@
 # frozen_string_literal: true
 
 root = File.expand_path("..", __dir__)
+
+# Must run before the library is loaded: it uses syntax older Rubies cannot parse.
+if RUBY_VERSION.split(".").first.to_i < 3
+  require "rbconfig"
+  abort(
+    "session-memory needs Ruby 3.0+, but #{RbConfig.ruby} is #{RUBY_VERSION}.\n" \
+    "Put a newer Ruby first on PATH (e.g. activate mise/rbenv), or run it explicitly:\n" \
+    "  $(mise which ruby) #{File.join(root, "bin", "session-memory")} #{ARGV.join(" ")}".rstrip,
+  )
+end
+
 $LOAD_PATH.unshift(File.join(root, "lib")) unless $LOAD_PATH.include?(File.join(root, "lib"))
 
 require "session_memory"

@@ -392,13 +392,14 @@ module SessionMemory
 
     def print_codex_feature_flag_hint!
       if codex_hooks_enabled?
-        note("Codex feature flag codex_hooks already enabled")
+        note("Codex feature flag hooks already enabled")
+        note("Codex feature flag codex_hooks is deprecated, rename it to hooks") if codex_legacy_hooks_flag?
       else
         hint = <<~HINT.strip
           Codex hooks are not enabled yet. Add this to #{codex_config_path}:
 
           [features]
-          codex_hooks = true
+          hooks = true
 
           Then trust the hook with /hooks in the Codex TUI if prompted.
         HINT
@@ -407,10 +408,18 @@ module SessionMemory
     end
 
     def codex_hooks_enabled?
-      return false unless File.exist?(codex_config_path)
+      codex_config_text.match?(/^\s*(?:codex_)?hooks\s*=\s*true\s*$/)
+    end
 
-      text = File.read(codex_config_path)
-      text.match?(/^\s*codex_hooks\s*=\s*true\s*$/)
+    # Codex renamed [features].codex_hooks to [features].hooks; the old name still works but warns.
+    def codex_legacy_hooks_flag?
+      codex_config_text.match?(/^\s*codex_hooks\s*=\s*true\s*$/)
+    end
+
+    def codex_config_text
+      return "" unless File.exist?(codex_config_path)
+
+      File.read(codex_config_path)
     end
 
     def check_ruby
@@ -449,7 +458,8 @@ module SessionMemory
           end
         end
       flag_ok = codex_hooks_enabled?
-      { name: "codex hooks", ok: !!events_ok && flag_ok, detail: "hooks=#{!!events_ok} feature_flag=#{flag_ok}" }
+      flag_detail = flag_ok && codex_legacy_hooks_flag? ? "true (deprecated codex_hooks, rename to hooks)" : flag_ok.to_s
+      { name: "codex hooks", ok: !!events_ok && flag_ok, detail: "hooks=#{!!events_ok} feature_flag=#{flag_detail}" }
     end
 
     def check_claude

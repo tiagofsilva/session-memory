@@ -2,7 +2,7 @@
 
 Lightweight, private handoff memory so a coding task can move between Cursor, Claude Code, and Codex without losing decisions, requirements, corrections, and the current thread.
 
-Sessions are **per person** and stored under `~/.session-memory/`. Nothing is written into your repositories. Colleagues install the same tool and keep their own sessions.
+Sessions are **per person** and stored under `~/.session-memory/`. Nothing is written into your repositories. Install the same tool and keep their own sessions.
 
 ## Install
 
@@ -19,8 +19,10 @@ If Codex hooks are not enabled yet, the installer prints the exact lines to add 
 
 ```toml
 [features]
-codex_hooks = true
+hooks = true
 ```
+
+Older Codex versions used `codex_hooks = true`; that name still works but is deprecated, so rename it to `hooks`.
 
 Codex may ask you to trust the hook via `/hooks` on first use.
 
