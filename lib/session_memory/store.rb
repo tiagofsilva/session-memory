@@ -83,9 +83,14 @@ module SessionMemory
       digest_path.sub(/\.digest\.md\z/, ".log.md")
     end
 
-    def latest_digest
+    def latest_digest(excluding_session_id: nil)
       ensure!
-      Dir.glob(File.join(sessions_dir, "*-#{repo_name}-#{current_branch}-*.digest.md")).max
+      paths = Dir.glob(File.join(sessions_dir, "*-#{repo_name}-#{current_branch}-*.digest.md"))
+      if excluding_session_id
+        suffix = "-#{short_id(excluding_session_id)}.digest.md"
+        paths.reject! { |path| path.end_with?(suffix) }
+      end
+      paths.max
     end
 
     def inject_marker_path(session_id)

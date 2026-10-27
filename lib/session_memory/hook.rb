@@ -138,17 +138,23 @@ module SessionMemory
       digest
     end
 
-    def latest_injection
-      Digest.injection_context(store.latest_digest)
+    def inject_handoff(seed: false)
+      marker = store.inject_marker_path(session_id)
+      unless File.exist?(marker)
+        # Select the previous session before creating this session's digest.
+        context = Digest.injection_context(store.latest_digest(excluding_session_id: session_id))
+      end
+      seed_and_log! if seed
+      return silent_ok unless context
+
+      yield context
+      File.write(marker, Time.now.iso8601)
     end
 
     def handle_cursor
       case normalize_event(@event)
       when "sessionstart"
-        ctx = latest_injection
-        out = {}
-        out["additional_context"] = ctx if ctx
-        puts(JSON.generate(out))
+        inject_handoff { |context| puts(JSON.generate({ "additional_context" => context })) }
       when "beforesubmitprompt"
         seed_and_log!
         puts("{}")
@@ -164,18 +170,10 @@ module SessionMemory
     def handle_codex
       case normalize_event(@event)
       when "sessionstart"
-        emit_codex_context!("SessionStart", latest_injection)
+        inject_handoff { |context| emit_codex_context!("SessionStart", context) }
       when "userpromptsubmit"
-        seed_and_log!
-        # Inject at most once per conversation (SessionStart may be unavailable).
-        marker = store.inject_marker_path(session_id)
-        if File.exist?(marker)
-          puts("{}")
-        else
-          text = latest_injection || Digest.injection_context(store.digest_path(short))
-          File.write(marker, Time.now.iso8601) if text
-          emit_codex_context!("UserPromptSubmit", text)
-        end
+        # Fall back to the first prompt if SessionStart did not deliver a handoff.
+        inject_handoff(seed: true) { |context| emit_codex_context!("UserPromptSubmit", context) }
       when "stop"
         seed_and_log!
         puts("{}")
@@ -200,19 +198,11 @@ module SessionMemory
 
     def handle_claude
       case normalize_event(@event)
-      when "userpromptsubmit", "sessionstart"
-        digest = seed_and_log!
-        marker = store.inject_marker_path(session_id)
-        unless File.exist?(marker)
-          ctx = Digest.injection_context(store.latest_digest) || Digest.injection_context(digest)
-          if ctx
-            File.write(marker, Time.now.iso8601)
-            # Claude injects UserPromptSubmit stdout into the prompt
-            puts(ctx)
-            return
-          end
-        end
-        # stay silent
+      when "sessionstart"
+        inject_handoff { |context| puts(context) }
+      when "userpromptsubmit"
+        # Claude injects UserPromptSubmit stdout into the prompt.
+        inject_handoff(seed: true) { |context| puts(context) }
       when "stop"
         seed_and_log!
       else

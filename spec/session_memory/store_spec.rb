@@ -68,6 +68,24 @@ RSpec.describe SessionMemory::Store do
 
       expect(store.latest_digest).to eq(newer)
     end
+
+    it "can exclude the receiving session while keeping the current branch scope" do
+      prior = store.digest_path("previous", time: Time.new(2020, 1, 1))
+      current = store.digest_path("receiver", time: Time.new(2021, 1, 1))
+      File.write(prior, "prior")
+      File.write(current, "current")
+      other_branch = File.join(store.sessions_dir, "2099-01-01-0000-#{store.repo_name}-main-other123.digest.md")
+      File.write(other_branch, "another branch")
+
+      expect(store.latest_digest(excluding_session_id: "receiver-session")).to eq(prior)
+      expect(store.latest_digest).to eq(current)
+    end
+
+    it "returns nil when only the receiving session has a digest" do
+      File.write(store.digest_path("receiver"), "current")
+
+      expect(store.latest_digest(excluding_session_id: "receiver-session")).to be_nil
+    end
   end
 
   describe "#in_git_repo?" do

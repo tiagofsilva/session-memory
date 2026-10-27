@@ -34,7 +34,9 @@ On each prompt / session start / stop, a user-level hook calls:
 <path-to-ruby> <checkout>/bin/session-memory hook <cursor|codex|claude>
 ```
 
-That seeds a digest (once per conversation), regenerates the matching log from the tool transcript when available, and injects the latest digest for the current repo/branch into the agent context at session start.
+At session start, the hook injects the latest digest from another conversation on the current repo/branch. Delivery is tracked so it happens once per conversation. Claude Code and Codex can also deliver it on a prompt if startup did not deliver one. With no previous digest, nothing is injected.
+
+Prompt and stop hooks seed this conversation's digest (once) and regenerate its matching log from the tool transcript when available.
 
 ### Store layout
 
