@@ -44,6 +44,7 @@ Prompt and stop hooks seed this conversation's digest (once) and regenerate its 
 ~/.session-memory/                     (mode 700)
   sessions/<repo>/YYYY-MM-DD-HHMM-<repo>-<branch>-<shortid>.digest.md
   sessions/<repo>/YYYY-MM-DD-HHMM-<repo>-<branch>-<shortid>.log.md
+  sessions/<repo>/history/<digest-name>/<timestamp>-<id>.digest.md
 ```
 
 Worktrees share the parent repo's memory (via `git rev-parse --git-common-dir`).
@@ -57,6 +58,53 @@ session-memory latest        # print its path
 
 Or tell the agent: "resume the session" / "checkpoint this session".
 
+### Checkpoint
+
+When you ask for a checkpoint, the agent summarizes the conversation and saves it
+through the CLI. The command does not call an LLM or generate a summary itself.
+
+Save a JSON file such as `/tmp/checkpoint.json`:
+
+```json
+{
+  "decisions": ["Keep the runtime dependency-free."],
+  "current_state": ["Checkpoint command implemented; tests pass; changes are uncommitted."],
+  "open_questions": [],
+  "next_step": "Review and commit the changes."
+}
+```
+
+From the repository, run:
+
+```sh
+session-memory checkpoint --input /tmp/checkpoint.json
+# Or supply the same JSON on stdin:
+session-memory checkpoint < /tmp/checkpoint.json
+# Target a specific conversation when several sessions are open:
+session-memory checkpoint --session <conversation-id> --input /tmp/checkpoint.json
+```
+
+All four example fields are required. Lists must contain non-empty strings;
+`current_state` needs at least one item and `next_step` must be a non-empty string.
+Empty `decisions` and `open_questions` lists explicitly record "None." Optional
+`goal` (string), `requirements` and `corrections` (arrays of strings) replace those
+sections when supplied. Omitted optional sections, session metadata, and custom
+sections are preserved. Unknown fields and values containing level-two Markdown
+headings (`## `) are rejected.
+
+The target is `--session`, then `CODEX_THREAD_ID` if set, otherwise the latest
+digest for the current repo/branch. A missing target is an error; checkpointing
+does not create a new conversation. With no known session ID, inspect
+`session-memory show` to verify the latest digest belongs to your task first.
+
+Each save keeps the previous digest in `sessions/<repo>/history/` and atomically
+replaces the current digest. Logs are untouched. Checkpoint writes to the same
+digest are serialized. History is excluded from handoff selection and is retained
+when `prune` removes old session digests and logs.
+
+Re-run `./bin/session-memory install` after upgrading to refresh the agent
+instructions for this command.
+
 ## Commands
 
 | Command | Purpose |
@@ -67,6 +115,7 @@ Or tell the agent: "resume the session" / "checkpoint this session".
 | `hook <tool>` | Invoked by harness hooks (stdin JSON) |
 | `latest [repo]` | Path to newest digest for repo+branch |
 | `show [repo]` | Print that digest |
+| `checkpoint [--session ID] [--input FILE] [repo]` | Validate and save a summary, keeping the previous version |
 | `prune [--days N]` | Delete digests/logs older than N days (default 30) |
 
 ## Known limits

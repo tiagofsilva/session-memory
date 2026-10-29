@@ -84,13 +84,17 @@ module SessionMemory
     end
 
     def latest_digest(excluding_session_id: nil)
-      ensure!
-      paths = Dir.glob(File.join(sessions_dir, "*-#{repo_name}-#{current_branch}-*.digest.md"))
+      paths = branch_digests
       if excluding_session_id
         suffix = "-#{short_id(excluding_session_id)}.digest.md"
         paths.reject! { |path| path.end_with?(suffix) }
       end
       paths.max
+    end
+
+    def session_digest(session_id)
+      suffix = "-#{repo_name}-#{current_branch}-#{short_id(session_id)}.digest.md"
+      branch_digests.find { |path| path.end_with?(suffix) }
     end
 
     def inject_marker_path(session_id)
@@ -112,6 +116,11 @@ module SessionMemory
     end
 
     private
+
+    def branch_digests
+      ensure!
+      Dir.glob(File.join(sessions_dir, "*-#{repo_name}-#{current_branch}-*.digest.md"))
+    end
 
     def git(*args)
       return "" unless File.directory?(@repo_root)

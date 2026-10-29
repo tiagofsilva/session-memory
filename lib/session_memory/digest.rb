@@ -29,6 +29,9 @@ module SessionMemory
         ## Current state
         -\s
 
+        ## Open questions / blockers
+        -\s
+
         ## Next step
         -\s
       DIGEST
