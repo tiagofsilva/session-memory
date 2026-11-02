@@ -169,4 +169,5 @@ RSpec.describe SessionMemory::Checkpoint do
     expect(File.read(history.first)).to eq(@original)
     expect(Dir.glob(File.join(@store.sessions_dir, "**", ".checkpoint-*.tmp"))).to be_empty
   end
+
 end

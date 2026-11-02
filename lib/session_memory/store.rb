@@ -92,9 +92,16 @@ module SessionMemory
       paths.max
     end
 
-    def session_digest(session_id)
-      suffix = "-#{repo_name}-#{current_branch}-#{short_id(session_id)}.digest.md"
-      branch_digests.find { |path| path.end_with?(suffix) }
+    def session_digest(session_id, all_branches: false)
+      suffix = "-#{short_id(session_id)}.digest.md"
+      paths = all_branches ? Dir.glob(File.join(sessions_dir, "*.digest.md")) : branch_digests
+      paths.find { |path| path.end_with?(suffix) && (all_branches || path.end_with?("-#{repo_name}-#{current_branch}#{suffix}")) }
+    end
+
+    def latest_active_digest(excluding_session_id: nil)
+      paths = branch_digests
+      paths.reject! { |path| path.end_with?("-#{short_id(excluding_session_id)}.digest.md") } if excluding_session_id
+      paths.max_by { |path| [SessionState.activity_at(self, path), File.basename(path)] }
     end
 
     def inject_marker_path(session_id)
@@ -118,8 +125,14 @@ module SessionMemory
     private
 
     def branch_digests
-      ensure!
-      Dir.glob(File.join(sessions_dir, "*-#{repo_name}-#{current_branch}-*.digest.md"))
+      branch = current_branch
+      Dir.glob(File.join(sessions_dir, "*.digest.md")).select do |path|
+        first_line = File.open(path, &:gets).to_s.scrub
+        id = Digest.metadata(first_line)[:id] || File.basename(path)[/-([^-]+)\.digest\.md\z/, 1]
+        id && path.end_with?("-#{repo_name}-#{branch}-#{id}.digest.md")
+      rescue Errno::ENOENT
+        false
+      end
     end
 
     def git(*args)

@@ -4,6 +4,25 @@ module SessionMemory
   module Digest
     module_function
 
+    def sections(text)
+      text.scan(/^## ([^\r\n]+)\r?\n(.*?)(?=^## |\z)/m).map { |heading, body| [heading.strip, body.strip] }
+    end
+
+    def metadata(text)
+      {
+        id: text[/\A# Session digest: ([^\r\n]+)/, 1]&.strip,
+        tool: text[/^Date: .*? · Tool: ([^·\r\n]*)/, 1]&.strip,
+      }
+    end
+
+    def complete?(text)
+      contents = sections(text).to_h
+      ["Current state", "Next step"].all? do |heading|
+        value = contents[heading].to_s.strip
+        !value.empty? && value != "-" && !value.include?("<fill in>")
+      end
+    end
+
     def write(path:, short_id:, tool:, model:, goal:, log_path:, git_sha:)
       File.write(path, <<~DIGEST)
         # Session digest: #{short_id}

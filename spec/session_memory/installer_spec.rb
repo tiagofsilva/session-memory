@@ -28,6 +28,10 @@ RSpec.describe SessionMemory::Installer do
       "hooks" => {
         "afterFileEdit" => [{ "command" => "./hooks/format.sh" }],
         "beforeSubmitPrompt" => [{ "command" => "./hooks/other.sh" }],
+        "stop" => [
+          { "command" => "#{SessionMemory.bin_path} hook cursor", "loop_limit" => 1 },
+          { "command" => "./hooks/other-stop.sh", "loop_limit" => 5 },
+        ],
       },
     }))
 
@@ -39,6 +43,10 @@ RSpec.describe SessionMemory::Installer do
     expect(data["hooks"]["beforeSubmitPrompt"].any? { |e| e["command"].include?("session-memory hook cursor") }).to be(true)
     expect(data["hooks"]["sessionStart"]).not_to be_empty
     expect(data["hooks"]["stop"]).not_to be_empty
+    expect(data["hooks"]["stop"]).to contain_exactly(
+      { "command" => installer.hook_command("cursor") },
+      { "command" => "./hooks/other-stop.sh", "loop_limit" => 5 },
+    )
   end
 
   it "is idempotent when run twice" do
@@ -63,6 +71,8 @@ RSpec.describe SessionMemory::Installer do
 
     expect(File.read(config)).to eq(original)
     expect(File.exist?(File.join(@home, ".codex", "hooks.json"))).to be(true)
+    claude = JSON.parse(File.read(File.join(@home, ".claude", "settings.json")))
+    expect(claude.dig("hooks", "SessionStart")).not_to be_empty
   end
 
   it "uninstall removes our entries and leaves the store" do
@@ -75,5 +85,20 @@ RSpec.describe SessionMemory::Installer do
     data = JSON.parse(File.read(File.join(@home, ".cursor", "hooks.json")))
     expect(Array(data.dig("hooks", "beforeSubmitPrompt")).none? { |e| e["command"].include?("session-memory") }).to be(true)
     expect(File.exist?(File.join(@store, "sessions", "demo", "x.digest.md"))).to be(true)
+  end
+
+  it "verifies SQLite and FTS5 using the Ruby selected for hooks" do
+    result = installer.doctor.find { |check| check[:name] == "sqlite search" }
+
+    expect(result[:ok]).to be(true)
+    expect(result[:detail]).to include("SQLite", "FTS5")
+  end
+
+  it "refuses to install hooks when SQLite or FTS5 is unavailable" do
+    status = double(success?: false)
+    allow(Open3).to receive(:capture3).and_return(["", "no such module: fts5\n", status])
+
+    expect { installer.install! }.to raise_error(/SQLite\/FTS5 unavailable/)
+    expect(File.exist?(File.join(@home, ".cursor", "hooks.json"))).to be(false)
   end
 end

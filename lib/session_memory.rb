@@ -25,8 +25,11 @@ end
 
 require_relative "session_memory/store"
 require_relative "session_memory/digest"
-require_relative "session_memory/checkpoint"
 require_relative "session_memory/transcripts"
+require_relative "session_memory/session_state"
+require_relative "session_memory/index"
+require_relative "session_memory/checkpoint"
+require_relative "session_memory/handoff"
 require_relative "session_memory/hook"
 require_relative "session_memory/installer"
 require_relative "session_memory/cli"

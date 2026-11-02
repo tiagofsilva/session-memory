@@ -4,6 +4,8 @@ require "json"
 require "fileutils"
 require "rbconfig"
 require "shellwords"
+require "bundler"
+require "open3"
 
 module SessionMemory
   class Installer
@@ -26,6 +28,8 @@ module SessionMemory
 
     def install!
       resolve_ruby!
+      sqlite = check_sqlite
+      raise sqlite[:detail] unless sqlite[:ok]
       ensure_store!
       install_cursor_hooks!
       install_codex_hooks!
@@ -48,6 +52,7 @@ module SessionMemory
     def doctor
       results = []
       results << check_ruby
+      results << check_sqlite
       results << check_store
       results << check_cursor
       results << check_codex
@@ -71,11 +76,10 @@ module SessionMemory
       candidates << RbConfig.ruby
 
       path = candidates.find { |p| File.executable?(p) }
-      raise "No usable Ruby found (need 3.0+)" unless path
+      raise "No usable Ruby found (need 3.2+)" unless path
 
       version = `#{Shellwords.escape(path)} -e 'print RUBY_VERSION'`.strip
-      major, = version.split(".").map(&:to_i)
-      raise "Ruby #{version} at #{path} is too old (need 3.0+)" if major < 3
+      raise "Ruby #{version} at #{path} is too old (need 3.2+)" if Gem::Version.new(version) < Gem::Version.new("3.2")
 
       @ruby_path = path
     end
@@ -251,6 +255,9 @@ module SessionMemory
       cmd = hook_command("claude")
 
       desired = {
+        "SessionStart" => [
+          { "hooks" => [{ "type" => "command", "command" => cmd }] },
+        ],
         "UserPromptSubmit" => [
           {
             "hooks" => [
@@ -441,6 +448,25 @@ module SessionMemory
       end
     end
 
+    def check_sqlite
+      script = <<~RUBY
+        require "bundler/setup"
+        require "sqlite3"
+        db = SQLite3::Database.new(":memory:")
+        db.execute("CREATE VIRTUAL TABLE probe USING fts5(body)")
+        db.close
+        print("SQLite " + SQLite3::SQLITE_VERSION + " with FTS5")
+      RUBY
+      stdout, stderr, status = Bundler.with_unbundled_env do
+        gemfile = File.join(SessionMemory.tool_root, "Gemfile")
+        Open3.capture3({ "BUNDLE_GEMFILE" => gemfile, "BUNDLE_LOCKFILE" => "#{gemfile}.lock" }, @ruby_path, "-e", script)
+      end
+      detail = status.success? ? stdout : "SQLite/FTS5 unavailable for #{@ruby_path}: #{stderr.lines.first.to_s.strip}; run bundle install in #{SessionMemory.tool_root}"
+      { name: "sqlite search", ok: status.success?, detail: detail }
+    rescue StandardError => e
+      { name: "sqlite search", ok: false, detail: e.message }
+    end
+
     def check_cursor
       data = read_json(cursor_hooks_path)
       ok = data && %w[sessionStart beforeSubmitPrompt stop].all? do |event|
@@ -465,7 +491,7 @@ module SessionMemory
     def check_claude
       data = read_json(claude_settings_path)
       ok =
-        data && %w[UserPromptSubmit Stop].all? do |event|
+        data && %w[SessionStart UserPromptSubmit Stop].all? do |event|
           Array(data.dig("hooks", event)).any? do |group|
             Array(group["hooks"]).any? { |h| our_command?(h["command"]) }
           end

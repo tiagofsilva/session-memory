@@ -23,9 +23,12 @@ module SessionMemory
       @store = store
     end
 
-    def write!(data:, session_id: nil)
+    def write!(data:, session_id: nil, transcript_revision: nil, expected_digest: nil, reviewed: [])
       validate!(data)
       raise Error, "not a git repo: #{@store.repo_root}" unless @store.in_git_repo?
+      if transcript_revision && (!session_id || !expected_digest)
+        raise Error, "handoff checkpoints require --session and --expected-digest"
+      end
 
       path = session_id ? @store.session_digest(session_id) : @store.latest_digest
       unless path
@@ -36,9 +39,29 @@ module SessionMemory
 
       # Keep the lock separate from the digest: atomic replacement changes its inode.
       lock_path = File.join(File.dirname(path), ".checkpoint-#{File.basename(path)}.lock")
-      File.open(lock_path, File::RDWR | File::CREAT, 0o600) do |lock|
+      result = File.open(lock_path, File::RDWR | File::CREAT, 0o600) do |lock|
         lock.flock(File::LOCK_EX)
         original = File.read(path)
+        state = SessionState.new(store: @store, digest_path: path)
+        snapshot = state.snapshot
+        if expected_digest && SessionState.revision(original) != expected_digest
+          raise Error, "source digest changed; refresh the handoff before saving"
+        end
+        if transcript_revision
+          unless snapshot[:available] && snapshot[:revision] == transcript_revision
+            raise Error, "source transcript changed or unavailable; refresh the handoff before saving"
+          end
+          if reviewed.empty? || reviewed.length > 32 || reviewed.any? { |range| !valid_range?(range, snapshot[:text].length) }
+            raise Error, "provide 1-32 reviewed ranges START:END within the source transcript"
+          end
+          coverage = state.reviewed_after(snapshot, reviewed)
+        else
+          raise Error, "reviewed ranges require --transcript-revision" unless reviewed.empty?
+          coverage = snapshot[:available] ? [[0, snapshot[:text].length]] : []
+        end
+        questions = data.fetch("open_questions").reject { |entry| entry.start_with?(SessionState::COVERAGE_NOTE) }
+        note = state.coverage_note(snapshot[:text].length, coverage) if snapshot[:available]
+        data = data.merge("open_questions" => questions + [note].compact)
         updated = render(original, data)
         history_dir = File.join(@store.sessions_dir, "history", File.basename(path, ".digest.md"))
         FileUtils.mkdir_p(history_dir, mode: 0o700)
@@ -47,11 +70,23 @@ module SessionMemory
 
         atomic_write(previous_version, original)
         atomic_write(path, updated)
+        begin
+          state.checkpoint!(snapshot: snapshot, digest: updated, reviewed: coverage)
+        rescue StandardError => e
+          warn("session-memory: checkpoint saved; coverage tracking failed: #{e.message}")
+        end
         { digest: path, previous_version: previous_version }
       end
+      Index.refresh_safely(store: @store, path: path)
+      result
     end
 
     private
+
+    def valid_range?(range, length)
+      range.is_a?(Array) && range.length == 2 && range.all? { |value| value.is_a?(Integer) } &&
+        range[0] >= 0 && range[0] < range[1] && range[1] <= length
+    end
 
     def validate!(data)
       raise Error, "checkpoint must be a JSON object" unless data.is_a?(Hash)

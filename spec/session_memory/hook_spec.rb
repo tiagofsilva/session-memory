@@ -242,4 +242,33 @@ RSpec.describe SessionMemory::Hook do
       expect(context_from.call(stdout)).to include("Newly available handoff")
     end
   end
+
+  %w[cursor codex claude].each do |tool|
+    it "refreshes #{tool}'s transcript on stop without continuing the conversation" do
+      path = write_digest(id: "stoptest", goal: "Keep the saved checkpoint", tool: tool)
+      original = File.read(path)
+      message = { content: [{ type: "text", text: "Turn complete" }] }
+      record = case tool
+      when "cursor" then { role: "assistant", message: message }
+      when "claude" then { type: "assistant", message: message }
+      when "codex" then { type: "response_item", payload: message.merge(type: "message", role: "assistant") }
+      end
+      transcript = File.join(@repo, "stop-transcript.jsonl")
+      File.write(transcript, record.to_json)
+      payload = {
+        hook_event_name: "Stop", session_id: "stoptest-full-id", conversation_id: "stoptest-full-id",
+        cwd: @repo, workspace_roots: [@repo], transcript_path: transcript,
+        status: "completed", loop_count: 0, stop_hook_active: false,
+      }
+
+      2.times do
+        stdout, status = run_hook(tool, payload)
+        expect(status).to be_success
+        expect(stdout.strip).to eq(tool == "claude" ? "" : "{}")
+      end
+      expect(File.read(path)).to eq(original)
+      expect(File.read(path.sub(".digest.md", ".log.md"))).to include("Turn complete")
+      expect(Dir.glob(File.join(File.dirname(path), ".auto-checkpoint-*"))).to be_empty
+    end
+  end
 end

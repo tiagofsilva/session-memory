@@ -114,7 +114,8 @@ module SessionMemory
       digest = store.digest_path(short)
       log = store.log_path(digest)
 
-      unless File.exist?(digest)
+      created = !File.exist?(digest)
+      if created
         Digest.write(
           path: digest,
           short_id: short,
@@ -126,15 +127,26 @@ module SessionMemory
         )
       end
 
-      body = Transcripts.render(@tool, transcript_path)
-      Digest.write_log(
-        path: log,
-        tool: @tool,
-        short_id: short,
-        source: transcript_path,
-        body: body,
-        placeholder: "#{@tool.capitalize} transcript was unavailable for this hook run.",
-      )
+      source = transcript_path
+      source = File.expand_path(source, @repo_root) if source && !source.empty?
+      body = Transcripts.render(@tool, source)
+      # An unavailable transcript must not erase useful capture from an earlier hook.
+      unless body.to_s.strip.empty? && !SessionState.log_body(log).empty?
+        Digest.write_log(
+          path: log,
+          tool: @tool,
+          short_id: short,
+          source: source,
+          body: body,
+          placeholder: "#{@tool.capitalize} transcript was unavailable for this hook run.",
+        )
+      end
+      begin
+        SessionState.new(store: store, digest_path: digest).capture!(body: body, source: source)
+      rescue StandardError => e
+        warn("session-memory: capture saved; activity tracking failed: #{e.message}")
+      end
+      Index.refresh_safely(store: store, path: digest) if created
       digest
     end
 
@@ -142,13 +154,18 @@ module SessionMemory
       marker = store.inject_marker_path(session_id)
       unless File.exist?(marker)
         # Select the previous session before creating this session's digest.
-        context = Digest.injection_context(store.latest_digest(excluding_session_id: session_id))
+        context = Handoff.new(store: store).prepare(current_session_id: session_id)
       end
       seed_and_log! if seed
       return silent_ok unless context
 
       yield context
       File.write(marker, Time.now.iso8601)
+    end
+
+    def handle_stop
+      seed_and_log!
+      silent_ok
     end
 
     def handle_cursor
@@ -159,8 +176,7 @@ module SessionMemory
         seed_and_log!
         puts("{}")
       when "stop"
-        seed_and_log! if session_id
-        puts("{}")
+        handle_stop
       else
         seed_and_log!
         puts("{}")
@@ -175,8 +191,7 @@ module SessionMemory
         # Fall back to the first prompt if SessionStart did not deliver a handoff.
         inject_handoff(seed: true) { |context| emit_codex_context!("UserPromptSubmit", context) }
       when "stop"
-        seed_and_log!
-        puts("{}")
+        handle_stop
       else
         seed_and_log!
         puts("{}")
@@ -204,7 +219,7 @@ module SessionMemory
         # Claude injects UserPromptSubmit stdout into the prompt.
         inject_handoff(seed: true) { |context| puts(context) }
       when "stop"
-        seed_and_log!
+        handle_stop
       else
         seed_and_log!
       end
